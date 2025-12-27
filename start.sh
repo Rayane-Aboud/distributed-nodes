@@ -1,16 +1,30 @@
 #!/bin/sh
-# Compile entire workspace
+set -e
+
+pids=""
+
+cleanup() {
+    echo "Stopping all nodes"
+    kill $pids 2>/dev/null
+    exit 0
+}
+
+trap cleanup INT TERM
+
 cargo build --release
 
-# Start supervisor
 ./target/release/supervisor &
+pids="$pids $!"
 
-# Allow server socket to bind
 sleep 1
 
-# Launch multiple independent workers
 ./target/release/worker worker-1 &
+pids="$pids $!"
+
 ./target/release/worker worker-2 &
+pids="$pids $!"
+
 ./target/release/worker worker-3 &
+pids="$pids $!"
 
 wait

@@ -1,67 +1,77 @@
-use tokio::net::TcpListener;           // TCP server socket
+use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::broadcast;            // Fan-out messaging
-use common::{Message, serialize};      // Shared protocol
+use tokio::sync::broadcast;
+use common::{Message, serialize};
 
-#[tokio::main]                         // Async runtime entry point
-async fn main() {
-    // Bind TCP listener to fixed address
-    let listener = TcpListener::bind("127.0.0.1:9000").await.unwrap();
+pub struct SupervisorNode {
+    listener: TcpListener,
+    tx: broadcast::Sender<String>,
+}
 
-    // Broadcast channel allows one sender to reach many receivers
-    let (tx, _) = broadcast::channel::<String>(128);
+impl SupervisorNode {
+    pub async fn new(addr: &str) -> Self {
+        let listener = TcpListener::bind(addr).await.unwrap();
+        let (tx, _) = broadcast::channel(128);
+
+        Self { listener, tx }
+    }
+
+    pub async fn run(self) {
+        loop {
+            let (socket, addr) = self.listener.accept().await.unwrap();
+
+            let tx = self.tx.clone();
+            let rx = tx.subscribe();
+
+            tokio::spawn(handle_connection(socket, addr.to_string(), tx, rx));
+        }
+    }
+}
+
+
+async fn handle_connection(
+    socket: TcpStream,
+    addr: String,
+    tx: broadcast::Sender<String>,
+    mut rx: broadcast::Receiver<String>,
+) {
+    let (read, mut write) = socket.into_split();
+    let mut reader = BufReader::new(read);
+    let mut buffer = String::new();
+
+    let _ = tx.send(serialize(Message::Connected(addr.clone())));
 
     loop {
-        // Accept incoming TCP connection
-        let (socket, addr) = listener.accept().await.unwrap();
+        tokio::select! {
+            r = reader.read_line(&mut buffer) => {
+                if r.unwrap_or(0) == 0 {
+                    let _ = tx.send(
+                        serialize(Message::Disconnected(addr.clone()))
+                    );
+                    break;
+                }
 
-        // Clone sender so each connection can publish
-        let tx = tx.clone();
+                let _ = tx.send(
+                    serialize(Message::Broadcast(buffer.trim().to_string()))
+                );
 
-        // Each connection gets its own receiver
-        let mut rx = tx.subscribe();
+                buffer.clear();
+            }
 
-        // Spawn independent task per worker
-        tokio::spawn(async move {
-            // Split socket into read/write halves
-            let (read, mut write) = socket.into_split();
-
-            // Wrap reader for line-based protocol
-            let mut reader = BufReader::new(read);
-            let mut buffer = String::new();
-
-            // Notify all nodes of new connection
-            let _ = tx.send(serialize(Message::Connected(addr.to_string())));
-
-            loop {
-                tokio::select! {
-                    // Handle inbound worker message
-                    read = reader.read_line(&mut buffer) => {
-                        if read.unwrap_or(0) == 0 {
-                            // Worker disconnected
-                            let _ = tx.send(
-                                serialize(Message::Disconnected(addr.to_string()))
-                            );
-                            break;
-                        }
-
-                        // Relay worker message to all peers
-                        let _ = tx.send(
-                            serialize(Message::Broadcast(buffer.trim().to_string()))
-                        );
-
-                        buffer.clear();
-                    }
-
-                    // Receive broadcast from supervisor channel
-                    msg = rx.recv() => {
-                        if let Ok(msg) = msg {
-                            // Send broadcast to this worker
-                            let _ = write.write_all(format!("{}\n", msg).as_bytes()).await;
-                        }
-                    }
+            m = rx.recv() => {
+                if let Ok(m) = m {
+                    let _ = write
+                        .write_all(format!("{}\n", m).as_bytes())
+                        .await;
                 }
             }
-        });
+        }
     }
+}
+
+
+#[tokio::main]
+async fn main() {
+    let supervisor = SupervisorNode::new("127.0.0.1:9000").await;
+    supervisor.run().await;
 }
