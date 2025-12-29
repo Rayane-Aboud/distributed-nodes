@@ -5,7 +5,7 @@ use tokio::net::{TcpListener};
 use tokio::sync::{Mutex, broadcast};
 
 use crate::tasks::{run_cli, run_network};
-use crate::worker_node::{ WorkerRegistry};
+use crate::worker_node_info::{ WorkerRegistry};
 
 
 

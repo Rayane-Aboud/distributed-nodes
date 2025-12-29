@@ -1,6 +1,6 @@
 use tokio::{net::TcpListener, sync::broadcast};
 
-use crate::{utils::{cli_loop, handle_connection}, worker_node::WorkerRegistry};
+use crate::{utils::{cli_loop, handle_connection}, worker_node_info::WorkerRegistry};
 
 pub async fn run_network(
     listener: TcpListener,

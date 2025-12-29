@@ -1,13 +1,10 @@
-mod worker_node;
+mod worker_node_info;
 mod tasks;
 mod utils;
 mod supervisor_node;
 
 
 use crate::supervisor_node::SupervisorNode;
-
-
-
 
 #[tokio::main]
 async fn main() {

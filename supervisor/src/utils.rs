@@ -3,7 +3,7 @@ use std::{collections::HashMap, net::SocketAddr};
 use common::{Message, serialize};
 use tokio::{io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}}, sync::{Mutex, broadcast}, time::Instant};
 
-use crate::worker_node::{WorkerInfo, WorkerRegistry};
+use crate::worker_node_info::{WorkerInfo, WorkerRegistry};
 
 
 async fn register_worker(

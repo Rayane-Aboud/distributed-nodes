@@ -1,11 +1,35 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::{net::{TcpListener, TcpStream}, sync::broadcast};                    // Async TCP client
 
-#[derive(Debug, Clone)]
-pub struct WorkerInfo {
-    pub addr: SocketAddr,
+
+
+struct WorkerNode {
+    id: String,
+    listener: TcpListener,
+    server_socket: TcpStream,
+    tx: broadcast::Sender<String>,
 }
 
-pub type WorkerRegistry = Arc<Mutex<HashMap<String, WorkerInfo>>>;
+impl WorkerNode {
+    async fn new(id: String, addr: &str) -> Self {
+        
+        let server_socket = TcpStream::connect(addr).await.unwrap();
+        let listener = TcpListener::bind(addr).await.unwrap();
+        //channel only used to broadcast heartbeat
+        let (tx, _) = broadcast::channel(128);
+
+        Self {
+            id,
+            listener,
+            server_socket,
+            tx
+        }
+    }
+
+    async fn run(self) {
+        let net = tokio::spawn(run_network(
+            
+        ));
+        
+    }
+}
