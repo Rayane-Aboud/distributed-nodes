@@ -1,35 +1,31 @@
-use std::net::SocketAddr;
-use tokio::{net::{TcpListener, TcpStream}, sync::broadcast};                    // Async TCP client
+use tokio::{net::{TcpStream}, time::Instant};
+
+use crate::tasks::{worker_read_loop, worker_write_loop};                    // Async TCP client
 
 
 
-struct WorkerNode {
+pub struct WorkerNode {
     id: String,
-    listener: TcpListener,
-    server_socket: TcpStream,
-    tx: broadcast::Sender<String>,
+    supervisor: TcpStream,
+    start: Instant
 }
 
-impl WorkerNode {
-    async fn new(id: String, addr: &str) -> Self {
-        
-        let server_socket = TcpStream::connect(addr).await.unwrap();
-        let listener = TcpListener::bind(addr).await.unwrap();
-        //channel only used to broadcast heartbeat
-        let (tx, _) = broadcast::channel(128);
 
-        Self {
-            id,
-            listener,
-            server_socket,
-            tx
-        }
+impl WorkerNode {
+    pub async fn new(id: String, supervisor_addr: &str) -> Self {
+        let supervisor = TcpStream::connect(supervisor_addr).await.unwrap();
+        let start = Instant::now();
+        Self {id, supervisor,start}
     }
 
-    async fn run(self) {
-        let net = tokio::spawn(run_network(
-            
-        ));
-        
+
+    pub async fn run(self) {
+        let (read, write) = self.supervisor.into_split();
+
+        let reader = tokio::spawn(worker_read_loop(read));
+        let start = self.start;
+        let writer = tokio::spawn(worker_write_loop(self.id, write, start));
+
+        let _ = tokio::join!(reader, writer);
     }
 }

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, net::SocketAddr};
 
 use common::{deserialize, protocol::{NodeToServer, ServerToNode, WireMessage}, serialize};
-use tokio::{io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}}, sync::{Mutex, broadcast}, time::Instant};
+use tokio::{io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader}, net::{TcpStream}, sync::{Mutex, broadcast}, time::Instant};
 
 use crate::worker_node_info::{WorkerInfo, WorkerRegistry};
 
@@ -53,7 +53,7 @@ pub async fn handle_worker_session(
     };
     
     register_worker(&workers, &node_id, addr).await;
-
+    println!("{:?}",workers);
     // ---- send WELCOME ----
     let welcome = WireMessage::ServerToNode(
         ServerToNode::Welcome { supervisor_id: "supervisor-1".to_string() }

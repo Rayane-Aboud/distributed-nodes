@@ -1,20 +1,73 @@
-use tokio::net::TcpListener;
+use std::time::Duration;
 
-use tokio::sync::broadcast;
+use common::deserialize;
+use common::protocol::ServerToNode;
+use tokio::net::tcp::OwnedReadHalf;
+use tokio::{net::tcp::OwnedWriteHalf, time::Instant};
+use tokio::io::{AsyncWriteExt, BufReader};
+use tokio::io::AsyncBufReadExt;
 
-use crate::worker_node_info::WorkerRegistry;
-
-pub async fn run_network(
-    listener: TcpListener,
-    tx: broadcast::Sender<String>,
-    workers: WorkerRegistry
+use common::{protocol::{NodeToServer, WireMessage}, serialize};
+pub async fn worker_write_loop(
+    id: String,
+    mut write: OwnedWriteHalf,
+    start: Instant
 ) {
-    loop {
-        let (socket, addr) = listener.accept().await.unwrap();
-        let rx = tx.subscribe();
-        let tx = tx.clone();
-        let workers = workers.clone();
+    // ---- HELLO ----
+    let hello = WireMessage::NodeToServer(
+        NodeToServer::Hello { node_id: id.clone() }
+    );
 
-        tokio::spawn(handle_connection(socket,addr,tx,rx,workers));
+    write
+        .write_all(format!("{}\n", serialize(hello)).as_bytes())
+        .await
+        .unwrap();
+
+    // ---- HEARTBEAT LOOP ----
+    loop {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        let heartbeat = WireMessage::NodeToServer(
+            NodeToServer::Heartbeat {
+                node_id: id.clone(),
+                timestamp: start.elapsed().as_millis() as u64,
+            }
+        );
+
+        if write
+            .write_all(format!("{}\n", serialize(heartbeat)).as_bytes())
+            .await
+            .is_err()
+        {
+            break;
+        }
+    }
+}
+
+
+pub async fn worker_read_loop(read: OwnedReadHalf) {
+    let mut reader = BufReader::new(read);
+    let mut buffer = String::new();
+
+    loop {
+        match reader.read_line(&mut buffer).await.unwrap_or(0){
+            0 => break,
+            _ => {
+                let msg: WireMessage = deserialize(buffer.trim());
+                match msg {
+                    WireMessage::ServerToNode(ServerToNode::Welcome { .. }) => {
+                        // mark connected (log only)
+                        println!("welcomed by the supervisor");
+                    }
+                    WireMessage::ServerToNode(ServerToNode::Shutdown { .. }) => {
+                        break;
+                    }
+                    _ => {
+                        break; // protocol violation
+                    }
+                }
+                buffer.clear();
+            }
+        }
     }
 }
