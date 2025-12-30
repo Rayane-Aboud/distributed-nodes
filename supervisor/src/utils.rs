@@ -1,6 +1,6 @@
 use std::{collections::HashMap, net::SocketAddr};
 
-use common::{Message, serialize};
+use common::{deserialize, protocol::{NodeToServer, ServerToNode, WireMessage}, serialize};
 use tokio::{io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}}, sync::{Mutex, broadcast}, time::Instant};
 
 use crate::worker_node_info::{WorkerInfo, WorkerRegistry};
@@ -8,6 +8,7 @@ use crate::worker_node_info::{WorkerInfo, WorkerRegistry};
 
 async fn register_worker(
     workers: &Mutex<HashMap<String, WorkerInfo>>,
+    node_id: &str,
     addr: SocketAddr,
 ) {
     let mut map = workers.lock().await;
@@ -28,71 +29,66 @@ async fn remove_worker (
     map.remove(&addr.to_string());
 }
 
-async fn handle_read(
-    reader: &mut BufReader<OwnedReadHalf>,
-    buffer: &mut String,
-    tx: &broadcast::Sender<String>,
-    addr: &str,
-) -> bool {
-    match reader.read_line(buffer).await.unwrap_or(0) {
-        0 => {
-            let _ = tx.send(serialize(Message::Disconnected(addr.to_string())));
-            false
-        }
-        _ => {
-            let _ = tx.send(serialize(Message::Broadcast(
-                buffer.trim().to_string(),
-            )));
-            buffer.clear();
-            true
-        }
-    }
-}
 
 
-async fn handle_write(
-    writer: &mut OwnedWriteHalf,
-    rx: &mut broadcast::Receiver<String>,
-) {
-    if let Ok(msg) = rx.recv().await {
-        let _ = writer
-            .write_all(format!("{}\n", msg).as_bytes())
-            .await;
-    }
-}
-
-
-
-
-pub async fn handle_connection(
+pub async fn handle_worker_session(
     socket: TcpStream,
     addr: SocketAddr,
-    tx: broadcast::Sender<String>,
-    mut rx: broadcast::Receiver<String>,
     workers: WorkerRegistry,
 ) {
-
-    register_worker(&workers, addr).await;
 
     let (read, mut write) = socket.into_split();
     let mut reader = BufReader::new(read);
     let mut buffer = String::new();
-    let addr_str = &addr.to_string();
-    let _ = tx.send(serialize(Message::Connected(addr.to_string())));
+
+    // ---- expect HELLO ----
+    if reader.read_line(&mut buffer).await.unwrap_or(0) == 0 {
+        return;
+    }
+
+    let msg = deserialize::<WireMessage>(buffer.trim());
+    let node_id = match msg {
+        WireMessage::NodeToServer(NodeToServer::Hello { node_id }) => node_id,
+        _ => return,
+    };
+    
+    register_worker(&workers, &node_id, addr).await;
+
+    // ---- send WELCOME ----
+    let welcome = WireMessage::ServerToNode(
+        ServerToNode::Welcome { supervisor_id: "supervisor-1".to_string() }
+    );
+
+    write
+        .write_all(format!("{}\n",serialize(welcome)).as_bytes())
+        .await
+        .ok();
+
+    buffer.clear();
 
     loop {
-        tokio::select! {
-            ok = handle_read(&mut reader, &mut buffer, &tx, addr_str) => {
-                if !ok { break; }
-            }
+        match reader.read_line(&mut buffer).await.unwrap_or(0) {
+            0 => break,
+            _ => {
+                let msg = deserialize::<WireMessage>(buffer.trim());
+                match msg {
+                    WireMessage::NodeToServer(NodeToServer::Heartbeat { node_id, timestamp })=>{
 
-            _ = handle_write(&mut write, &mut rx) => {}
+                    }
+                    WireMessage::NodeToServer(NodeToServer::Disconnect { reason }) => {
+                        break;
+                    }
+                    _ => {
+                        break; // protocol violation
+                    }
+
+                }
+                buffer.clear();
+            }
         }
     }
 
     remove_worker(&workers,addr).await;
-    
-    let _ = tx.send(serialize(Message::Disconnected(addr.to_string())));
 }
 
 

@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::net::{TcpListener};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex};
 
-use crate::tasks::{run_cli, run_network};
+use crate::tasks::{run_cli, accept_node_connections};
 use crate::worker_node_info::{ WorkerRegistry};
 
 
@@ -12,18 +12,15 @@ use crate::worker_node_info::{ WorkerRegistry};
 
 pub struct SupervisorNode {
     listener: TcpListener,
-    tx: broadcast::Sender<String>,
     workers: WorkerRegistry,
 }
 
 impl SupervisorNode {
     pub async fn new(addr: &str) -> Self {
         let listener = TcpListener::bind(addr).await.unwrap();
-        let (tx, _) = broadcast::channel(128);
 
         Self { 
             listener, 
-            tx, 
             workers: Arc::new(Mutex::new(HashMap::new())), 
         }
     }
@@ -31,9 +28,8 @@ impl SupervisorNode {
     pub async fn run(self) {
         
         // Network subsystem
-        let net = tokio::spawn(run_network(
+        let net = tokio::spawn(accept_node_connections(
             self.listener,
-            self.tx.clone(),
             self.workers.clone(),
         ));
 
