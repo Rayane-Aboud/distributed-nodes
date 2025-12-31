@@ -23,6 +23,11 @@ pub enum ServerToNode {
     Welcome {
         supervisor_id: String,
     },
+
+    NewPeer {
+        node: PeerInfoMessage,
+    },
+
     Command {
         payload: String,
     },
@@ -30,6 +35,12 @@ pub enum ServerToNode {
     Shutdown {
         reason:String,
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PeerInfoMessage {
+    node_id: String,
+    addr:String
 }
 
 

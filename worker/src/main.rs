@@ -1,5 +1,3 @@
-use crate::worker_node::WorkerNode;
-
 mod tasks;
 mod worker_node_info;
 mod utils;
@@ -15,7 +13,7 @@ async fn main() {
         .unwrap_or_else(|| "worker".to_string());
 
     // Construct node
-    let worker = WorkerNode::new(id, "127.0.0.1:9000").await;
+    //let worker = WorkerNode::new(id, "127.0.0.1:9000").await;
 
     // Run node lifecycle
     worker.run().await;

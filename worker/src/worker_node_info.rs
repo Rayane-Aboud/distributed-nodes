@@ -1,12 +1,10 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
-use tokio::{sync::Mutex, time::Instant};
+use tokio::sync::Mutex;
 
-pub type WorkerRegistry = Arc<Mutex<HashMap<String, WorkerInfo>>>;
-
-
-#[derive(Debug, Clone)]
-pub struct WorkerInfo {
+pub struct PeerInfo {
+    pub node_id: String,
     pub addr: SocketAddr,
-    pub connected_at: Instant,
 }
+
+pub type PeerRegistry = Arc<Mutex<HashMap<String, PeerInfo>>>;

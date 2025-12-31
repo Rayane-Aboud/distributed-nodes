@@ -2,28 +2,31 @@ use std::time::Duration;
 
 use common::deserialize;
 use common::protocol::ServerToNode;
+use tokio::net::TcpListener;
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::{net::tcp::OwnedWriteHalf, time::Instant};
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::io::AsyncBufReadExt;
 
 use common::{protocol::{NodeToServer, WireMessage}, serialize};
-pub async fn worker_write_loop(
-    id: String,
-    mut write: OwnedWriteHalf,
-    start: Instant
-) {
-    // ---- HELLO ----
-    let hello = WireMessage::NodeToServer(
-        NodeToServer::Hello { node_id: id.clone() }
-    );
+
+use crate::worker_node_info::PeerRegistry;
+
+pub async fn send_hello_to_supervisor(id: &str, write: &mut OwnedWriteHalf) {
+    let hello = WireMessage::NodeToServer(NodeToServer::Hello { node_id: id.to_string() });
 
     write
         .write_all(format!("{}\n", serialize(hello)).as_bytes())
         .await
         .unwrap();
+}
 
-    // ---- HEARTBEAT LOOP ----
+pub async fn send_heartbeat_to_supervisor(
+    id: String,
+    mut write: OwnedWriteHalf,
+    start: Instant
+) {
+
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
 
@@ -45,7 +48,7 @@ pub async fn worker_write_loop(
 }
 
 
-pub async fn worker_read_loop(read: OwnedReadHalf) {
+pub async fn receive_from_supervisor(read: OwnedReadHalf) {
     let mut reader = BufReader::new(read);
     let mut buffer = String::new();
 
@@ -69,5 +72,22 @@ pub async fn worker_read_loop(read: OwnedReadHalf) {
                 buffer.clear();
             }
         }
+    }
+}
+
+
+
+
+pub async fn accept_peer_connection(
+    id: String,
+    listener: TcpListener,
+    peers: PeerRegistry,
+){
+    loop {
+        let (socket, _) = listener.accept().await.unwrap();
+        let peers = peers.clone();
+        let id = id.clone();
+
+        tokio::spawn(handle_peer_session(socket, peers));
     }
 }
