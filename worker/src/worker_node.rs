@@ -1,6 +1,6 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
-use tokio::{net::{TcpListener, TcpStream}, sync::Mutex, time::Instant};
+use tokio::{net::{TcpListener, TcpStream}, sync::{Mutex, mpsc}, time::Instant};
 
 use crate::{tasks::{receive_from_supervisor, send_heartbeat_to_supervisor, send_hello_to_supervisor}, worker_node_info::{PeerInfo, PeerRegistry}};                    // Async TCP client
 
@@ -10,7 +10,10 @@ pub struct WorkerNode {
     start: Instant,
     peers: PeerRegistry,
     peer_listener: TcpListener,
-    listen_addr: SocketAddr
+    listen_addr: SocketAddr,
+
+    tx_peer_info: mpsc::Sender<PeerInfo>,
+    rx_peer_info: mpsc::Receiver<PeerInfo>
 }
 
 
@@ -20,7 +23,10 @@ impl WorkerNode {
         let start = Instant::now();
         let peers: Arc<Mutex<HashMap<String, PeerInfo>>> = Arc::new(Mutex::new(HashMap::new()));
         let peer_listener = TcpListener::bind(listen_addr).await.unwrap();
-        Self {id, supervisor,start, peers, peer_listener, listen_addr}
+
+        let (tx_peer_info, rx_peer_info): (mpsc::Sender<PeerInfo>, mpsc::Receiver<PeerInfo>) = mpsc::channel(32);
+
+        Self {id, supervisor,start, peers, peer_listener, listen_addr, tx_peer_info, rx_peer_info}
     }
 
 
@@ -31,8 +37,9 @@ impl WorkerNode {
 
 
         //start the loops
+        let supervisor_receiver = tokio::spawn(receive_from_supervisor(read, self.tx_peer_info));
 
-        let supervisor_receiver = tokio::spawn(receive_from_supervisor(read));
+        //heartbeat sender
         let start = self.start;
         let hb_sender = tokio::spawn(send_heartbeat_to_supervisor(self.id, write, start));
 

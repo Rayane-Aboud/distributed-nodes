@@ -1,7 +1,7 @@
 use std::{collections::HashMap, net::SocketAddr};
 
 use common::{deserialize, protocol::{NodeToServer, ServerToNode, WireMessage}, serialize};
-use tokio::{io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader}, net::{TcpStream}, sync::{Mutex, broadcast}, time::Instant};
+use tokio::{io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader}, net::TcpStream, sync::{Mutex, mpsc}, time::Instant};
 
 use crate::worker_node_info::{WorkerInfo, WorkerRegistry};
 
@@ -10,6 +10,7 @@ async fn register_worker(
     workers: &Mutex<HashMap<String, WorkerInfo>>,
     node_id: &str,
     addr: SocketAddr,
+    tx: mpsc::Sender<WireMessage>,
 ) {
     let mut map = workers.lock().await;
     map.insert(
@@ -17,18 +18,41 @@ async fn register_worker(
         WorkerInfo {
             addr,
             connected_at: Instant::now(),
+            tx,
         },
     );
 }
 
-async fn remove_worker (
+pub async fn remove_worker(
     workers: &Mutex<HashMap<String, WorkerInfo>>,
-    addr: SocketAddr,
-){
+    node_id: &str,
+) {
     let mut map = workers.lock().await;
-    map.remove(&addr.to_string());
+    map.remove(node_id);
 }
 
+async fn setup_worker(
+    workers: &WorkerRegistry,
+    node_id: String,
+    addr: SocketAddr,
+    write: tokio::net::tcp::OwnedWriteHalf,
+) -> mpsc::Sender<WireMessage> {
+
+    let (tx, mut rx) = mpsc::channel::<WireMessage>(32);
+    
+    tokio::spawn(async move {
+        let mut writer = write;
+        while let Some(msg) = rx.recv().await {
+            let _ = writer
+                .write_all(format!("{}\n", serialize(msg)).as_bytes())
+                .await;
+        }
+    });
+
+    register_worker(workers, &node_id, addr, tx.clone()).await;
+
+    tx
+}
 
 
 pub async fn handle_worker_session(
@@ -36,12 +60,12 @@ pub async fn handle_worker_session(
     addr: SocketAddr,
     workers: WorkerRegistry,
 ) {
-
-    let (read, mut write) = socket.into_split();
+    let (read, write) = socket.into_split();
     let mut reader = BufReader::new(read);
     let mut buffer = String::new();
 
-    // ---- expect HELLO ----
+
+    // --- expect HELLO ---
     if reader.read_line(&mut buffer).await.unwrap_or(0) == 0 {
         return;
     }
@@ -51,44 +75,41 @@ pub async fn handle_worker_session(
         WireMessage::NodeToServer(NodeToServer::Hello { node_id }) => node_id,
         _ => return,
     };
-    
-    register_worker(&workers, &node_id, addr).await;
-    println!("{:?}",workers);
-    // ---- send WELCOME ----
-    let welcome = WireMessage::ServerToNode(
-        ServerToNode::Welcome { supervisor_id: "supervisor-1".to_string() }
-    );
-
-    write
-        .write_all(format!("{}\n",serialize(welcome)).as_bytes())
-        .await
-        .ok();
-
     buffer.clear();
 
+
+    // --- setup worker: channel, writer task, registry ---
+    let tx = setup_worker(&workers, node_id.clone(), addr, write).await;
+
+
+
+    // --- send WELCOME ---
+    let welcome = WireMessage::ServerToNode(ServerToNode::Welcome {
+        supervisor_id: "supervisor-1".to_string(),
+    });
+    let _ = tx.send(welcome).await;
+
+
+    // --- main read loop ---
     loop {
-        match reader.read_line(&mut buffer).await.unwrap_or(0) {
-            0 => break,
-            _ => {
-                let msg = deserialize::<WireMessage>(buffer.trim());
-                match msg {
-                    WireMessage::NodeToServer(NodeToServer::Heartbeat { node_id, timestamp })=>{
-
-                    }
-                    WireMessage::NodeToServer(NodeToServer::Disconnect { reason }) => {
-                        break;
-                    }
-                    _ => {
-                        break; // protocol violation
-                    }
-
-                }
-                buffer.clear();
-            }
+        let n = reader.read_line(&mut buffer).await.unwrap_or(0);
+        if n == 0 {
+            break;
         }
+
+        let msg = deserialize::<WireMessage>(buffer.trim());
+        match msg {
+            WireMessage::NodeToServer(NodeToServer::Heartbeat { .. }) => {}
+            WireMessage::NodeToServer(NodeToServer::Disconnect { .. }) => break,
+            _ => break, // protocol violation
+        }
+
+        buffer.clear();
     }
 
-    remove_worker(&workers,addr).await;
+    // --- cleanup ---
+    remove_worker(&workers, &node_id).await;
+    
 }
 
 

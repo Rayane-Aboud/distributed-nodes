@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use serde::{Serialize, Deserialize};
 
 
@@ -38,9 +40,9 @@ pub enum ServerToNode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PeerInfoMessage {
-    node_id: String,
-    addr:String
+pub struct PeerInfoMessage {
+    pub node_id: String,
+    pub addr:SocketAddr
 }
 
 
@@ -52,6 +54,10 @@ pub enum NodeToNode {
     PeerMessage {
         from: String,
         payload: String,
+    },
+    JoinMessage {
+        id: String,
+        addr: SocketAddr
     }
 }
 
