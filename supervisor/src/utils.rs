@@ -1,6 +1,6 @@
 use std::{collections::HashMap, net::SocketAddr};
 
-use common::{deserialize, protocol::{NodeToServer, ServerToNode, WireMessage}, serialize};
+use common::{deserialize, protocol::{NodeToServer, PeerInfoMessage, ServerToNode, WireMessage}, serialize};
 use tokio::{io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader}, net::TcpStream, sync::{Mutex, mpsc}, time::Instant};
 
 use crate::worker_node_info::{WorkerInfo, WorkerRegistry};
@@ -55,6 +55,95 @@ async fn setup_worker(
 }
 
 
+pub async fn read_node_hello(reader: &mut BufReader<tokio::net::tcp::OwnedReadHalf>) -> Option<String> {
+    let mut buffer = String::new();
+
+    let n = reader.read_line(&mut buffer).await.ok()?; // return None if read fails
+    if n == 0 {
+        return None; // connection closed
+    }
+
+    match deserialize::<WireMessage>(buffer.trim()) {
+        WireMessage::NodeToServer(NodeToServer::Hello { node_id }) => Some(node_id),
+        _ => None, // unexpected message
+    }
+}
+
+
+pub async fn register_and_welcome(
+    workers: &WorkerRegistry,
+    node_id: String,
+    addr: SocketAddr,
+    write: tokio::net::tcp::OwnedWriteHalf,
+    supervisor_id: &str,
+) -> mpsc::Sender<WireMessage> {
+    // 1. create channel
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<WireMessage>(32);
+
+    // 2. spawn writer task
+    tokio::spawn(async move {
+        let mut writer = write;
+        while let Some(msg) = rx.recv().await {
+            let _ = writer
+                .write_all(format!("{}\n", serialize(msg)).as_bytes())
+                .await;
+        }
+    });
+
+    // 3. register worker in registry
+    register_worker(workers, &node_id, addr, tx.clone()).await;
+
+    // 4. send Welcome immediately
+    let welcome = WireMessage::ServerToNode(ServerToNode::Welcome {
+        supervisor_id: supervisor_id.to_string(),
+    });
+    let _ = tx.send(welcome).await;
+
+    tx
+}
+
+pub async fn send_peer_list(
+    workers: &WorkerRegistry,
+    node_id: &str,
+    tx: &mpsc::Sender<WireMessage>,
+) {
+    let workers_lock = workers.lock().await;
+    for (existing_id, worker) in workers_lock.iter() {
+        if existing_id == node_id {
+            continue;
+        }
+        let peer_info = PeerInfoMessage {
+            node_id: existing_id.clone(),
+            addr: worker.addr,
+        };
+        let _ = tx.send(WireMessage::ServerToNode(ServerToNode::NewPeer {
+            node: peer_info,
+        })).await;
+    }
+}
+
+
+pub async fn broadcast_new_peer(
+    workers: &WorkerRegistry,
+    node_id: &str,
+    addr: SocketAddr,
+) {
+    let new_peer_info = PeerInfoMessage {
+        node_id: node_id.to_string(),
+        addr,
+    };
+    let workers_lock = workers.lock().await;
+    for (existing_id, worker) in workers_lock.iter() {
+        if existing_id == node_id {
+            continue;
+        }
+        let _ = worker.tx.send(WireMessage::ServerToNode(ServerToNode::NewPeer {
+            node: new_peer_info.clone(),
+        })).await;
+    }
+}
+
+
 pub async fn handle_worker_session(
     socket: TcpStream,
     addr: SocketAddr,
@@ -62,46 +151,32 @@ pub async fn handle_worker_session(
 ) {
     let (read, write) = socket.into_split();
     let mut reader = BufReader::new(read);
-    let mut buffer = String::new();
 
-
-    // --- expect HELLO ---
-    if reader.read_line(&mut buffer).await.unwrap_or(0) == 0 {
-        return;
-    }
-
-    let msg = deserialize::<WireMessage>(buffer.trim());
-    let node_id = match msg {
-        WireMessage::NodeToServer(NodeToServer::Hello { node_id }) => node_id,
-        _ => return,
+    // --- read Hello ---
+    let node_id = match read_node_hello(&mut reader).await {
+        Some(id) => id,
+        None => return,
     };
-    buffer.clear();
 
+    // --- register worker + spawn writer + send Welcome ---
+    let tx = register_and_welcome(&workers, node_id.clone(), addr, write, "supervisor-1").await;
 
-    // --- setup worker: channel, writer task, registry ---
-    let tx = setup_worker(&workers, node_id.clone(), addr, write).await;
+    // --- send PeerList to new node ---
+    send_peer_list(&workers, &node_id, &tx).await;
 
-
-
-    // --- send WELCOME ---
-    let welcome = WireMessage::ServerToNode(ServerToNode::Welcome {
-        supervisor_id: "supervisor-1".to_string(),
-    });
-    let _ = tx.send(welcome).await;
-
+    // --- broadcast NewPeer to existing nodes ---
+    broadcast_new_peer(&workers, &node_id, addr).await;
 
     // --- main read loop ---
+    let mut buffer = String::new();
     loop {
         let n = reader.read_line(&mut buffer).await.unwrap_or(0);
-        if n == 0 {
-            break;
-        }
+        if n == 0 { break; }
 
-        let msg = deserialize::<WireMessage>(buffer.trim());
-        match msg {
+        match deserialize::<WireMessage>(buffer.trim()) {
             WireMessage::NodeToServer(NodeToServer::Heartbeat { .. }) => {}
             WireMessage::NodeToServer(NodeToServer::Disconnect { .. }) => break,
-            _ => break, // protocol violation
+            _ => break,
         }
 
         buffer.clear();
@@ -109,7 +184,6 @@ pub async fn handle_worker_session(
 
     // --- cleanup ---
     remove_worker(&workers, &node_id).await;
-    
 }
 
 
