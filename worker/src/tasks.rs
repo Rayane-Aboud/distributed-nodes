@@ -4,7 +4,7 @@ use common::deserialize;
 use common::protocol::{NodeToNode, ServerToNode};
 use tokio::net::TcpListener;
 use tokio::net::tcp::OwnedReadHalf;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::{net::tcp::OwnedWriteHalf, time::Instant};
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::io::AsyncBufReadExt;
@@ -26,61 +26,68 @@ pub async fn send_hello_to_supervisor(id: &str, write: &mut OwnedWriteHalf) {
 pub async fn send_heartbeat_to_supervisor(
     id: String,
     mut write: OwnedWriteHalf,
-    start: Instant
+    start: Instant,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
     loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-
-        let heartbeat = WireMessage::NodeToServer(
-            NodeToServer::Heartbeat {
-                node_id: id.clone(),
-                timestamp: start.elapsed().as_millis() as u64,
+        tokio::select! {
+            _ = shutdown.changed() => {
+                break;
             }
-        );
 
-        if write
-            .write_all(format!("{}\n", serialize(heartbeat)).as_bytes())
-            .await
-            .is_err()
-        {
-            break;
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                let heartbeat = WireMessage::NodeToServer(
+                    NodeToServer::Heartbeat {
+                        node_id: id.clone(),
+                        timestamp: start.elapsed().as_millis() as u64,
+                    }
+                );
+
+                if write
+                    .write_all(format!("{}\n", serialize(heartbeat)).as_bytes())
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
         }
     }
 }
 
 
-pub async fn receive_from_supervisor(read: OwnedReadHalf, tx_peer_info: mpsc::Sender<PeerInfo>,) {
+
+pub async fn receive_from_supervisor(
+    read: OwnedReadHalf,
+    tx_peer_info: mpsc::Sender<PeerInfo>,
+    shutdown: watch::Sender<bool>,
+) {    
     let mut reader = BufReader::new(read);
     let mut buffer = String::new();
+
     loop {
-        match reader.read_line(&mut buffer).await.unwrap_or(0){
+        match reader.read_line(&mut buffer).await.unwrap_or(0) {
             0 => break,
             _ => {
                 let msg: WireMessage = deserialize(buffer.trim());
                 match msg {
-                    //welcome message
-                    WireMessage::ServerToNode(ServerToNode::Welcome { .. }) => {
-                        // mark connected (log only)
-                        println!("welcomed by the supervisor");
-                    }
-                    WireMessage::ServerToNode(ServerToNode::Shutdown { .. }) => {
-                        break;
-                    }
+                    WireMessage::ServerToNode(ServerToNode::Welcome { .. }) => {}
+                    WireMessage::ServerToNode(ServerToNode::Shutdown { .. }) => break,
                     WireMessage::ServerToNode(ServerToNode::NewPeer { node }) => {
-                        let node_info = PeerInfo { 
-                            node_id: node.node_id, 
-                            addr: node.addr 
-                        };
-                        let _ = tx_peer_info.send(node_info).await;
+                        let _ = tx_peer_info.send(PeerInfo {
+                            node_id: node.node_id,
+                            addr: node.addr,
+                        }).await;
                     }
-                    _ => {
-                        break; // protocol violation
-                    }
+                    _ => break,
                 }
                 buffer.clear();
             }
         }
     }
+
+    let _ = shutdown.send(true);
+
 }
 
 

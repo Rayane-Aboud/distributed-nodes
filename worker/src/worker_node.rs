@@ -31,20 +31,25 @@ impl WorkerNode {
 
 
     pub async fn run(self) {
-        let (read,mut write) = self.supervisor.into_split();
-        //send hello first
-        send_hello_to_supervisor(&self.id, &mut write).await;
+        let (read, write) = self.supervisor.into_split();
 
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
-        //start the loops
-        let supervisor_receiver = tokio::spawn(receive_from_supervisor(read, self.tx_peer_info));
+        // send hello once, synchronously, before loops
+        {
+            let mut write = write;
+            send_hello_to_supervisor(&self.id, &mut write).await;
 
-        //heartbeat sender
-        let start = self.start;
-        let hb_sender = tokio::spawn(send_heartbeat_to_supervisor(self.id, write, start));
+            let reader_task = tokio::spawn(
+                receive_from_supervisor(read, self.tx_peer_info, shutdown_tx.clone())
+            );
 
-        
+            let heartbeat_task = tokio::spawn(
+                send_heartbeat_to_supervisor(self.id, write, self.start, shutdown_rx)
+            );
 
-        let _ = tokio::join!(supervisor_receiver, hb_sender);
+            let _ = tokio::join!(reader_task, heartbeat_task);
+        }
     }
+
 }

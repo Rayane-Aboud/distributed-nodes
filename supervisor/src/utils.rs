@@ -168,7 +168,7 @@ pub async fn handle_worker_session(
     broadcast_new_peer(&workers, &node_id, addr).await;
 
     // --- main read loop ---
-    let mut buffer = String::new();
+    let mut buffer: String = String::new();
     loop {
         let n = reader.read_line(&mut buffer).await.unwrap_or(0);
         if n == 0 { break; }
