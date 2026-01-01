@@ -31,25 +31,44 @@ impl WorkerNode {
 
 
     pub async fn run(self) {
-        let (read, write) = self.supervisor.into_split();
+
+        let (supervisor_read, supervisor_write) = self.supervisor.into_split();
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
-        // send hello once, synchronously, before loops
-        {
-            let mut write = write;
-            send_hello_to_supervisor(&self.id, &mut write).await;
+        let hello_task = tokio::spawn(supervisor_session::hello::send_hello_to_supervisor(
+            &self.id,
+            &mut supervisor_write.clone()
+        ));
 
-            let reader_task = tokio::spawn(
-                receive_from_supervisor(read, self.tx_peer_info, shutdown_tx.clone())
-            );
+        let reader_task = tokio::spawn(supervisor_session::reader::receive_from_supervisor(
+            supervisor_read,
+            self.tx_peer_info.clone(),
+            shutdown_tx.clone()
+        ));
 
-            let heartbeat_task = tokio::spawn(
-                send_heartbeat_to_supervisor(self.id, write, self.start, shutdown_rx)
-            );
+        let heartbeat_task = tokio::spawn(supervisor_session::heartbeat::send_heartbeat_to_supervisor(
+            self.id.clone(),
+            supervisor_write,
+            self.start,
+            shutdown_rx
+        ));
 
-            let _ = tokio::join!(reader_task, heartbeat_task);
-        }
+        let peer_listener_task = tokio::spawn(peer::listener::peer_connection(
+            self.rx_peer_info,
+            self.peer_listener,
+            self.peers.clone()
+        ));
+
+
+        let _ = tokio::join!(
+            hello_task,
+            reader_task,
+            heartbeat_task,
+            peer_listener_task
+        );
+
+
     }
 
 }

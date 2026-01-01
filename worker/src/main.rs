@@ -6,7 +6,9 @@ mod tasks;
 mod worker_node_info;
 mod utils;
 mod worker_node;
-
+mod peer;
+mod protocol;
+mod supervisor_session;
 
 
 #[tokio::main]

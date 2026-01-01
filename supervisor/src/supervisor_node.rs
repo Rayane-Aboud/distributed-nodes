@@ -2,9 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::net::{TcpListener};
-use tokio::sync::{Mutex};
+use tokio::sync::{Mutex, mpsc};
 
-use crate::tasks::{run_cli, accept_node_connections};
+use crate::session::run_worker_session;
+use crate::supervisor_core::run_supervisor_core;
+use crate::tasks::{run_cli, handle_worker_nodes};
 use crate::worker_node_info::{ WorkerRegistry};
 
 
@@ -18,7 +20,6 @@ pub struct SupervisorNode {
 impl SupervisorNode {
     pub async fn new(addr: &str) -> Self {
         let listener = TcpListener::bind(addr).await.unwrap();
-
         Self { 
             listener, 
             workers: Arc::new(Mutex::new(HashMap::new())), 
@@ -27,17 +28,21 @@ impl SupervisorNode {
 
     pub async fn run(self) {
         
-        // Network subsystem
-        let net = tokio::spawn(accept_node_connections(
-            self.listener,
-            self.workers.clone(),
-        ));
+        let (
+            //session thread uses this to send events to the core
+            tx_supervisor,
+             
+            //supervisor core uses this to receive from sessions
+            rx_supervisor
+        
+        ) = mpsc::channel(128);
+        
+        tokio::spawn(run_supervisor_core(self.workers.clone(), rx_supervisor));
 
-        // CLI subsystem
-        let cli = tokio::spawn(run_cli(self.workers.clone()));
-
-        // Supervisor lives as long as both subsystems live
-        let _ = tokio::join!(net, cli);
+        loop {
+            let (socket, addr) = self.listener.accept().await.unwrap();
+            tokio::spawn(run_worker_session(socket,addr, tx_supervisor.clone()));
+        }
     }
 
 }

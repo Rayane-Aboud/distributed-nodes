@@ -1,8 +1,8 @@
 use tokio::{net::TcpListener};
 
-use crate::{utils::{cli_loop, handle_worker_session}, worker_node_info::WorkerRegistry};
+use crate::{utils::{cli_loop, run_worker_lifecycle}, worker_node_info::WorkerRegistry};
 
-pub async fn accept_node_connections(
+pub async fn handle_worker_nodes(
     listener: TcpListener,
     workers: WorkerRegistry,
 ) {
@@ -10,7 +10,7 @@ pub async fn accept_node_connections(
         let (socket, addr) = listener.accept().await.unwrap();
         let workers = workers.clone();
 
-        tokio::spawn(handle_worker_session(socket, addr, workers));
+        tokio::spawn(run_worker_lifecycle(socket, addr, workers));
     }
 }
 

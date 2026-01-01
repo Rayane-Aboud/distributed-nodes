@@ -6,7 +6,7 @@ use tokio::{io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader}, net::TcpStrea
 use crate::worker_node_info::{WorkerInfo, WorkerRegistry};
 
 
-async fn register_worker(
+async fn insert_worker(
     workers: &Mutex<HashMap<String, WorkerInfo>>,
     node_id: &str,
     addr: SocketAddr,
@@ -49,13 +49,13 @@ async fn setup_worker(
         }
     });
 
-    register_worker(workers, &node_id, addr, tx.clone()).await;
+    insert_worker(workers, &node_id, addr, tx.clone()).await;
 
     tx
 }
 
 
-pub async fn read_node_hello(reader: &mut BufReader<tokio::net::tcp::OwnedReadHalf>) -> Option<String> {
+pub async fn recv_worker_hello(reader: &mut BufReader<tokio::net::tcp::OwnedReadHalf>) -> Option<String> {
     let mut buffer = String::new();
 
     let n = reader.read_line(&mut buffer).await.ok()?; // return None if read fails
@@ -70,7 +70,7 @@ pub async fn read_node_hello(reader: &mut BufReader<tokio::net::tcp::OwnedReadHa
 }
 
 
-pub async fn register_and_welcome(
+pub async fn register_and_emit_welcome(
     workers: &WorkerRegistry,
     node_id: String,
     addr: SocketAddr,
@@ -91,7 +91,7 @@ pub async fn register_and_welcome(
     });
 
     // 3. register worker in registry
-    register_worker(workers, &node_id, addr, tx.clone()).await;
+    insert_worker(workers, &node_id, addr, tx.clone()).await;
 
     // 4. send Welcome immediately
     let welcome = WireMessage::ServerToNode(ServerToNode::Welcome {
@@ -144,7 +144,7 @@ pub async fn broadcast_new_peer(
 }
 
 
-pub async fn handle_worker_session(
+pub async fn run_worker_lifecycle(
     socket: TcpStream,
     addr: SocketAddr,
     workers: WorkerRegistry,
@@ -153,13 +153,13 @@ pub async fn handle_worker_session(
     let mut reader = BufReader::new(read);
 
     // --- read Hello ---
-    let node_id = match read_node_hello(&mut reader).await {
+    let node_id = match recv_worker_hello(&mut reader).await {
         Some(id) => id,
         None => return,
     };
 
     // --- register worker + spawn writer + send Welcome ---
-    let tx = register_and_welcome(&workers, node_id.clone(), addr, write, "supervisor-1").await;
+    let tx = register_and_emit_welcome(&workers, node_id.clone(), addr, write, "supervisor-1").await;
 
     // --- send PeerList to new node ---
     send_peer_list(&workers, &node_id, &tx).await;
