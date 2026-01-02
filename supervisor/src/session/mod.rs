@@ -1,4 +1,4 @@
-mod handshake;
-mod lifecycle;
-mod read_loop;
-mod writer;
+pub mod handshake;
+pub mod lifecycle;
+pub mod reader_loop;
+pub mod writer_loop;

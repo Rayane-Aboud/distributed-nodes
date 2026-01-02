@@ -1,70 +1,93 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use common::protocol::WireMessage;
+use common::protocol::{NodeToServer, SupervisorEvent, WireMessage};
 use tokio::{net::TcpStream, sync::mpsc, io::BufReader};
 
-use crate::session::{session_read_loop, spawn_writer};
-use crate::supervisor_core::SupervisorEvent;
-use crate::session::{handshake::handshake};
-
-pub async fn run_worker_session(
-    socket: TcpStream,
-    addr: SocketAddr,
-    supervisor_tx: mpsc::Sender<SupervisorEvent>,
-) {
-    let (mut reader, writer) = split_socket(socket);
-
-    let node_id = match handshake(&mut reader).await {
-        Some(id) => id,
-        None => return,
-    };
-
-    let tx = spawn_writer(writer);
-
-    admit_worker(&supervisor_tx, &node_id, addr, &tx).await;
-
-    session_read_loop(&mut reader).await;
-
-    supervisor_tx.send(SupervisorEvent::Remove { node_id }).await.ok();
+pub struct WorkerSession{
+    tasks: HashMap<String, tokio::task::JoinHandle<()>>,
+    pub worker_pub_key: Vec<u8>,
 }
 
-fn split_socket(
-    socket: TcpStream,
-) -> (
-    BufReader<tokio::net::tcp::OwnedReadHalf>,
-    tokio::net::tcp::OwnedWriteHalf,
-) {
-    let (read, write) = socket.into_split();
-    (BufReader::new(read), write)
+impl WorkerSession {
+    pub fn new() -> Self {
+        Self {
+            tasks: HashMap::new(),
+            worker_pub_key: Vec::new(),
+        }
+    }
+
+     pub async fn run(
+        mut self,
+        socket: TcpStream,
+        addr: SocketAddr,
+        supervisor_tx: mpsc::Sender<SupervisorEvent>,
+    ) {
+        // Take ownership of halves immediately
+        let (reader_half, writer_half) = socket.into_split();
+        let mut reader = BufReader::new(reader_half);
+
+        // Perform handshake
+        let hello_node_to_server = match Self::handshake(&mut reader).await {
+            Some(v) => v,
+            None => return,
+        };
+
+        // Spawn writer task
+        let (tx, writer_handle) = Self::spawn_writer(writer_half);
+        self.tasks.insert("writer".to_string(), writer_handle);
+
+        // Spawn reader task
+        let reader_handle = Self::spawn_reader(reader);
+        self.tasks.insert("reader".to_string(), reader_handle);
+
+        // Notify supervisor core of admission
+        Self::emit_admit(&supervisor_tx, &hello_node_to_server, addr, &tx).await;
+
+        // Wait for reader loop to finish
+        if let Some(handle) = self.tasks.remove("reader") {
+            let _ = handle.await;
+        }
+
+        // Remove worker
+        if let NodeToServer::Hello { node_id, .. } = &hello_node_to_server {
+            Self::emit_remove(&supervisor_tx, node_id.clone()).await;
+        }
+
+    }
 }
 
-async fn admit_worker(
-    supervisor_tx: &mpsc::Sender<SupervisorEvent>,
-    node_id: &str,
-    addr: SocketAddr,
-    tx: &mpsc::Sender<WireMessage>,
-) {
-    use common::protocol::{WireMessage, ServerToNode, PeerInfoMessage};
 
-    supervisor_tx.send(SupervisorEvent::Admit {
-        node_id: node_id.to_string(),
-        addr,
-        tx: tx.clone(),
-    }).await.ok();
 
-    supervisor_tx.send(SupervisorEvent::SendTo {
-        node_id: node_id.to_string(),
-        msg: WireMessage::ServerToNode(ServerToNode::Welcome {
-            supervisor_id: "supervisor-1".into(),
-        }),
-    }).await.ok();
+impl WorkerSession {
+    async fn emit_admit(
+        supervisor_tx: &mpsc::Sender<SupervisorEvent>,
+        hello: &NodeToServer,
+        addr: SocketAddr,
+        tx: &mpsc::Sender<WireMessage>,
+   
+    ) {
+        if let NodeToServer::Hello { node_id, pub_key, .. } = hello {
+        let _ = supervisor_tx.send(SupervisorEvent::Admit {
+            node_id: node_id.clone(),
+            addr,
+            tx: tx.clone(),
+            pub_key: pub_key.clone(),
+        }).await;
 
-    supervisor_tx.send(SupervisorEvent::Broadcast {
-        msg: WireMessage::ServerToNode(ServerToNode::NewPeer {
-            node: PeerInfoMessage {
-                node_id: node_id.to_string(),
-                addr,
-            },
-        }),
-        except: Some(node_id.to_string()),
-    }).await.ok();
+        }
+    }
+
+
+}
+
+impl WorkerSession {
+    /// Signal the supervisor core to remove this worker
+    async fn emit_remove(
+        supervisor_tx: &mpsc::Sender<SupervisorEvent>,
+        node_id: String,
+    ) {
+        let _ = supervisor_tx
+            .send(SupervisorEvent::Remove { node_id })
+            .await;
+    }
 }

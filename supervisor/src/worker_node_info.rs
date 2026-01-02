@@ -11,5 +11,6 @@ pub type WorkerRegistry = Arc<Mutex<HashMap<String, WorkerInfo>>>;
 pub struct WorkerInfo {
     pub addr: SocketAddr,
     pub connected_at: Instant,
+    pub pub_key: Vec<u8>,
     pub tx: mpsc::Sender<WireMessage>
 }
