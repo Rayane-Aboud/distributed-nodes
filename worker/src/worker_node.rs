@@ -2,7 +2,8 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use tokio::{net::{TcpListener, TcpStream}, sync::{Mutex, mpsc}, time::Instant};
 
-use crate::{tasks::{receive_from_supervisor, send_heartbeat_to_supervisor, send_hello_to_supervisor}, worker_node_info::{PeerInfo, PeerRegistry}};                    // Async TCP client
+use crate::{peer, supervisor_session, worker_node_info::{PeerInfo, PeerRegistry}};
+
 
 pub struct WorkerNode {
     id: String,
@@ -36,25 +37,25 @@ impl WorkerNode {
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
-        let hello_task = tokio::spawn(supervisor_session::hello::send_hello_to_supervisor(
+        let hello_task = tokio::spawn(supervisor_session::hello::send_hello(
             &self.id,
-            &mut supervisor_write.clone()
+            &mut supervisor_write
         ));
 
-        let reader_task = tokio::spawn(supervisor_session::reader::receive_from_supervisor(
+        let reader_task = tokio::spawn(supervisor_session::reader::receive_messages(
             supervisor_read,
             self.tx_peer_info.clone(),
             shutdown_tx.clone()
         ));
 
-        let heartbeat_task = tokio::spawn(supervisor_session::heartbeat::send_heartbeat_to_supervisor(
+        let heartbeat_task = tokio::spawn(supervisor_session::heartbeat::send_heartbeat(
             self.id.clone(),
             supervisor_write,
             self.start,
             shutdown_rx
         ));
 
-        let peer_listener_task = tokio::spawn(peer::listener::peer_connection(
+        let peer_listener_task = tokio::spawn(peer::listener::handle_peer_events(
             self.rx_peer_info,
             self.peer_listener,
             self.peers.clone()
