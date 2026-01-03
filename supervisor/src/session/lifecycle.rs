@@ -37,7 +37,7 @@ impl WorkerSession {
         self.tasks.insert("writer".to_string(), writer_handle);
 
         // Spawn reader task
-        let reader_handle = Self::spawn_reader(reader);
+        let reader_handle = Self::spawn_reader(reader, &supervisor_tx);
         self.tasks.insert("reader".to_string(), reader_handle);
 
         // Notify supervisor core of admission

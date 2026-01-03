@@ -106,8 +106,27 @@ pub enum SupervisorEvent {
         node_id: String,
         msg: WireMessage,
     },
+    Heartbeat {
+        node_id: String,
+        timestamp: u64,
+    },
+
     Broadcast {
         msg: WireMessage,
         except: Option<String>,
     },
 }
+
+pub enum WorkerEvent {
+    SupervisorWelcome {
+        supervisor_id: String,
+        peers: Vec<PeerInfoMessage>,
+    },
+    NewPeer {
+        peer: PeerInfoMessage,
+    },
+    SupervisorShutdown {
+        reason: String,
+    },
+}
+

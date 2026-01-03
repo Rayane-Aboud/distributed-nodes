@@ -41,31 +41,47 @@ pub async fn admit_and_welcome(
             .collect()
     };
 
-    // build payload
+    // build payload for signature
     let mut payload = node_id.as_bytes().to_vec();
     for peer in &peers {
         payload.extend_from_slice(peer.node_id.as_bytes());
         payload.extend_from_slice(&peer.pub_key);
     }
 
-    // sign
     let signature = signing_key
         .sign(&payload)
         .to_bytes()
         .to_vec();
 
-    // send welcome
+    // send welcome to the new node
     let _ = tx
         .send(WireMessage::ServerToNode(
             ServerToNode::Welcome {
                 supervisor_id: supervisor_id.to_string(),
-                supervisor_pub_key: signing_key
-                    .verifying_key()
-                    .to_bytes()
-                    .to_vec(),
+                supervisor_pub_key: signing_key.verifying_key().to_bytes().to_vec(),
                 peers,
-                signature,
+                signature: signature.clone(),
             },
         ))
         .await;
+
+    // broadcast NewPeer to all other nodes
+    let map = workers.lock().await;
+    for (id, w) in map.iter() {
+        if id == &node_id {
+            continue; // skip the new node
+        }
+
+        let _ = w.tx.send(WireMessage::ServerToNode(
+            ServerToNode::NewPeer {
+                node: PeerInfoMessage {
+                    node_id: node_id.clone(),
+                    addr,
+                    pub_key: pub_key.clone(),
+                    signature: signature.clone(),
+                },
+                signature: signature.clone(),
+            },
+        )).await;
+    }
 }

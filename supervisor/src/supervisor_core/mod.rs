@@ -3,7 +3,7 @@ mod admit_welcome;
 use common::protocol::{SupervisorEvent};
 use ed25519_dalek::{SigningKey};
 use tokio::{sync::mpsc};
-use crate::{supervisor_core::admit_welcome::admit_and_welcome, supervisor_node::SupervisorNode, worker_node_info::{WorkerInfo, WorkerRegistry}};
+use crate::{supervisor_core::admit_welcome::admit_and_welcome, supervisor_node::SupervisorNode, worker_node_info::{WorkerRegistry}};
 
 
 impl SupervisorNode {
@@ -25,6 +25,10 @@ impl SupervisorNode {
                         pub_key,
                         tx,
                     ).await;
+                }
+
+                SupervisorEvent::Heartbeat { node_id, timestamp } => {
+                    println!("received heartbeat message from node_id: {} at timestamp: {}",node_id, timestamp);
                 }
 
                 SupervisorEvent::Remove { node_id } => {

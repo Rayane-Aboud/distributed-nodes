@@ -5,7 +5,7 @@ use tokio::{io::{AsyncBufReadExt, BufReader}, sync::{Mutex, mpsc}, time::Instant
 
 use crate::worker_node_info::{WorkerInfo};
 
-
+/* 
 async fn insert_worker(
     workers: &Mutex<HashMap<String, WorkerInfo>>,
     node_id: &str,
@@ -21,7 +21,7 @@ async fn insert_worker(
             tx,
         },
     );
-}
+}*/
 
 pub async fn remove_worker(
     workers: &Mutex<HashMap<String, WorkerInfo>>,
@@ -41,11 +41,15 @@ pub async fn recv_worker_hello(reader: &mut BufReader<tokio::net::tcp::OwnedRead
         return None; // connection closed
     }
 
-    match deserialize::<WireMessage>(buffer.trim()) {
-        WireMessage::NodeToServer(NodeToServer::Hello { node_id, pub_key, signature }) => {
-            Some(NodeToServer::Hello { node_id, pub_key, signature })
+    if let Some(msg) = deserialize::<WireMessage>(buffer.trim()) {
+        match msg {
+            WireMessage::NodeToServer(NodeToServer::Hello { node_id, pub_key, signature }) => {
+                Some(NodeToServer::Hello { node_id, pub_key, signature })
+            }
+            _ => None, // unexpected message
         }
-        _ => None, // unexpected message
+    } else {
+        None // deserialization failed
     }
 }
 

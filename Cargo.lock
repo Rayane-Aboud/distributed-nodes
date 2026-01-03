@@ -837,6 +837,9 @@ name = "worker"
 version = "0.1.0"
 dependencies = [
  "common",
+ "ed25519-dalek",
+ "rand",
+ "rand_core",
  "serde",
  "serde_json",
  "tokio",
