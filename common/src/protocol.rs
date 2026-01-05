@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use serde::{Serialize, Deserialize};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 /// Node-to-supervisor messages
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +58,7 @@ pub struct PeerInfoMessage {
 pub enum NodeToNode {
     PeerHello {
         node_id: String,
+        pub_key: Vec<u8>,
         signature: Option<Vec<u8>>,
     },
     PeerMessage {
@@ -119,12 +120,20 @@ pub enum SupervisorEvent {
 }
 
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum WorkerEvent {
     SupervisorWelcome {
         supervisor_id: String,
         peers: Vec<PeerInfoMessage>,
     },
+    PeerHelloReceived {
+        node_id: String,
+        addr: SocketAddr,
+        pub_key: Vec<u8>,
+        signature: Option<Vec<u8>>,
+        tx: mpsc::Sender<WireMessage>,
+        admit_tx: oneshot::Sender<()>,
+    },
+
     NewPeer {
         peer: PeerInfoMessage,
     },

@@ -15,7 +15,8 @@ impl SupervisorSession {
         worker_tx: mpsc::Sender<WorkerEvent>,
     ) {
         let (read_half, write_half) = socket.into_split();
-        let (tx, writer_handle) = Self::spawn_writer(write_half);
+        let (tx, 
+            writer_handle) = Self::spawn_writer(write_half);
         let mut reader = BufReader::new(read_half);
         
         // 1. Initial handshake

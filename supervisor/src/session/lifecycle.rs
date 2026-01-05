@@ -67,12 +67,12 @@ impl WorkerSession {
    
     ) {
         if let NodeToServer::Hello { node_id, pub_key, .. } = hello {
-        let _ = supervisor_tx.send(SupervisorEvent::Admit {
-            node_id: node_id.clone(),
-            addr,
-            tx: tx.clone(),
-            pub_key: pub_key.clone(),
-        }).await;
+            let _ = supervisor_tx.send(SupervisorEvent::Admit {
+                node_id: node_id.clone(),
+                addr,
+                tx: tx.clone(),
+                pub_key: pub_key.clone(),
+            }).await;
 
         }
     }
