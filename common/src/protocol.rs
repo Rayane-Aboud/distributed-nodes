@@ -115,8 +115,11 @@ pub enum SupervisorEvent {
         msg: WireMessage,
         except: Option<String>,
     },
+
 }
 
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum WorkerEvent {
     SupervisorWelcome {
         supervisor_id: String,
@@ -128,5 +131,8 @@ pub enum WorkerEvent {
     SupervisorShutdown {
         reason: String,
     },
+    MessageFromPeer {
+        message: String
+    }
 }
 

@@ -1,13 +1,12 @@
 use std::net::SocketAddr;
 
-use crate::worker_node::WorkerNode;
-
 mod worker_node_info;
-mod utils;
 mod worker_node;
 mod supervisor_session;
 mod worker_session;
+mod utils;
 
+use crate::worker_node::WorkerNode;
 
 #[tokio::main]
 async fn main() {

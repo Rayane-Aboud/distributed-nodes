@@ -1,9 +1,7 @@
-use std::{collections::HashMap, net::SocketAddr};
 
 use common::{deserialize, protocol::{NodeToServer, WireMessage}};
-use tokio::{io::{AsyncBufReadExt, BufReader}, sync::{Mutex, mpsc}, time::Instant};
+use tokio::{io::{AsyncBufReadExt, BufReader}};
 
-use crate::worker_node_info::{WorkerInfo};
 
 /* 
 async fn insert_worker(
@@ -23,13 +21,6 @@ async fn insert_worker(
     );
 }*/
 
-pub async fn remove_worker(
-    workers: &Mutex<HashMap<String, WorkerInfo>>,
-    node_id: &str,
-) {
-    let mut map = workers.lock().await;
-    map.remove(node_id);
-}
 
 
 

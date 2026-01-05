@@ -36,10 +36,10 @@ impl SupervisorNode {
     }
 
     pub async fn run(self) {
-        // session → supervisor core channel
+        
         let (tx_supervisor, rx_supervisor) = mpsc::channel(128);
 
-        // extract core-owned state
+        
         let workers = self.workers.clone();
         let signing_key = self.signing_key.clone();
         let supervisor_id = self.id.clone();
@@ -55,7 +55,7 @@ impl SupervisorNode {
             .await;
         });
 
-        // accept loop stays in this task
+        
         let listener = self.listener;
 
         loop {
