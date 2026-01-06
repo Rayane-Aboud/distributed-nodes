@@ -64,7 +64,7 @@ cd distributed-nodes
 cargo build --release
 ```
 
-### Run
+### Run (currently not working --> run manually)
 
 ```bash
 ./start.sh
