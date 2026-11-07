@@ -1,6 +1,7 @@
 # Distributed Nodes
 
-A Rust-based framework implementing a supervisor-worker architecture for building scalable and fault-tolerant node clusters.
+A supervisor/worker cluster in Rust over raw TCP, with its own handshake protocol for node registration and
+peer discovery, and direct peer-to-peer links between workers.
 
 ## Overview
 
@@ -64,18 +65,16 @@ cd distributed-nodes
 cargo build --release
 ```
 
-### Run (currently not working --> run manually)
+### Run
+
+Start the supervisor, then as many workers as you like, each in its own terminal:
 
 ```bash
-./start.sh
+cargo run --release --bin supervisor
+cargo run --release --bin worker      # repeat in more terminals for more workers
 ```
 
-Or manually:
-
-```bash
-cargo run --bin supervisor
-cargo run --bin worker
-```
+Each new worker says `Hello`, receives the current peer list and connects to the existing workers.
 
 ## Development Roadmap
 
@@ -98,4 +97,4 @@ Open source. See repository for details.
 
 ## Author
 
-**Rayane Aboud** – Software & Systems Engineer, High-Performance & Distributed Systems, ESI Algiers.
+**Rayane Aboud**, Backend & AI Engineer ([rayaneaboud.dev](https://rayaneaboud.dev)).
