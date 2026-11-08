@@ -1,63 +1,40 @@
 # Distributed Nodes
 
-A supervisor/worker cluster in Rust over raw TCP, with its own handshake protocol for node registration and
-peer discovery, and direct peer-to-peer links between workers.
+A supervisor and worker cluster written in Rust over plain TCP. I wrote my own handshake so that new
+workers can register with the supervisor, find out about the other workers, and then talk to them
+directly.
 
-## Overview
+## How it's organised
 
-Distributed Nodes allows creating distributed systems in Rust. It provides a supervisor node that coordinates workers, handles peer discovery, and manages communication across a cluster.
+- The **supervisor** keeps track of the cluster: which nodes are connected, and who needs to be told when
+  a new one joins.
+- A **worker** connects to the supervisor, then opens direct connections to the other workers.
+- **common** holds the shared types and the messages of the protocol.
 
-## Architecture
+### What happens when a worker joins
 
-* **Supervisor**: Manages cluster topology, node registration, and peer notifications
-* **Worker**: Executes tasks and connects to other nodes
-* **Common**: Shared utilities and protocols
+1. **Handshake.** The worker sends `NodeToServer::Hello` and the supervisor answers with
+   `ServerToNode::Welcome`.
+2. **Discovery.** The supervisor sends the new worker the list of current peers (`ServerToNode::PeerList`),
+   and tells the existing workers that someone joined (`ServerToNode::PeerJoin`).
+3. **Connection.** The new worker updates its list of peers and connects to them, while the existing
+   workers note the newcomer in a temporary registry and wait for its connection.
 
-### Node Joining Process
-
-1. **Initial Handshake**
-
-   * Worker sends `NodeToServer::Hello`
-   * Supervisor responds `ServerToNode::Welcome`
-
-2. **Peer Discovery**
-
-   * Supervisor sends `ServerToNode::PeerList`
-   * Supervisor notifies existing nodes with `ServerToNode::PeerJoin`
-
-3. **Peer Connection**
-
-   * New node updates peer list and establishes connections
-   * Existing nodes update temporary registry and await incoming connections
-
-## Features
-
-* Direct peer-to-peer communication between workers
-* Supervisor-based cluster management
-* Local and temporary registries for connection tracking
-* Written in Rust for concurrency and safety
-
-## Project Structure
+## Project structure
 
 ```
 distributed-nodes/
-├── common/         # Shared types, protocols, utilities
-├── supervisor/     # Supervisor implementation
-├── worker/         # Worker implementation
-├── Cargo.toml      # Workspace config
-├── Cargo.lock      # Dependency lock
-├── start.sh        # Launch script
-└── readme.md       # Project description
+├── common/         # shared types and protocol messages
+├── supervisor/     # the supervisor
+├── worker/         # the worker
+├── Cargo.toml      # workspace configuration
+├── start.sh        # launch script
+└── readme.md
 ```
 
-## Getting Started
+## Running it
 
-### Prerequisites
-
-* Rust stable version
-* Cargo
-
-### Build
+You need a stable Rust toolchain.
 
 ```bash
 git clone https://github.com/Rayane-Aboud/distributed-nodes.git
@@ -65,36 +42,28 @@ cd distributed-nodes
 cargo build --release
 ```
 
-### Run
-
-Start the supervisor, then as many workers as you like, each in its own terminal:
+Start the supervisor, then as many workers as you like, each one in its own terminal:
 
 ```bash
 cargo run --release --bin supervisor
-cargo run --release --bin worker      # repeat in more terminals for more workers
+cargo run --release --bin worker      # run this in more terminals for more workers
 ```
 
-Each new worker says `Hello`, receives the current peer list and connects to the existing workers.
+Each new worker says `Hello`, gets the list of peers and connects to the workers that are already there.
 
-## Development Roadmap
+## Where it's going
 
-* ✅ Supervisor-worker architecture
-* ✅ Node registration & handshake
-* ✅ Peer discovery
-* ⏳ Connection management
-* ⏳ Logging with condition variables
+Done so far:
 
-Planned:
+- the supervisor and worker roles
+- registration and the handshake
+- peer discovery
 
-* [ ] Full logging system
-* [ ] Peer connection verification
-* [ ] Fault tolerance
-* [ ] Load balancing and task distribution
+In progress: managing connections over time, and logging with condition variables.
 
-## License
-
-Open source. See repository for details.
+Next: a complete logging system, checking that peer connections are really up, fault tolerance, and
+sharing tasks between workers.
 
 ## Author
 
-**Rayane Aboud**, Backend & AI Engineer ([rayaneaboud.dev](https://rayaneaboud.dev)).
+Rayane Aboud, Backend & AI Engineer ([rayaneaboud.dev](https://rayaneaboud.dev)).
